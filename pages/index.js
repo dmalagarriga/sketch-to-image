@@ -1,20 +1,12 @@
 import Canvas from "components/canvas";
 import PromptForm from "components/prompt-form";
 import Head from "next/head";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Predictions from "components/predictions";
 import Error from "components/error";
-import Welcome from "components/welcome";
-import uploadFile from "lib/upload";
 import naughtyWords from "naughty-words";
-import Script from "next/script";
 import seeds from "lib/seeds";
 import pkg from "../package.json";
-import sleep from "lib/sleep";
-
-const HOST = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
 
 export default function Home() {
   const [error, setError] = useState(null);
@@ -25,8 +17,24 @@ export default function Home() {
   const [seed] = useState(seeds[Math.floor(Math.random() * seeds.length)]);
   const [initialPrompt] = useState(seed.prompt);
   const [scribble, setScribble] = useState(null);
-  const [welcomeOpen, setWelcomeOpen] = useState(false);
 
+
+  function resizeScribble(dataUri, size = 256) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      resolve(canvas.toDataURL("image/jpeg", 0.8));
+    };
+    img.src = dataUri;
+  });
+}
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -41,76 +49,29 @@ export default function Home() {
     setError(null);
     setIsProcessing(true);
 
-    const fileUrl = await uploadFile(scribble);
-
-    const body = {
-      prompt,
-      image: fileUrl,
-      structure: "scribble",
-      replicate_api_token: localStorage.getItem("replicate_api_token"),
-    };
+    const smallScribble = await resizeScribble(scribble, 256);
+    const body = { prompt, image: smallScribble };
 
     const response = await fetch("/api/predictions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    let prediction = await response.json();
+    const prediction = await response.json();
+
+    if (response.status !== 201) {
+      setError(prediction.detail);
+      setIsProcessing(false);
+      return;
+    }
 
     setPredictions((predictions) => ({
       ...predictions,
       [prediction.id]: prediction,
     }));
 
-    if (response.status !== 201) {
-      setError(prediction.detail);
-      return;
-    }
-
-    while (
-      prediction.status !== "succeeded" &&
-      prediction.status !== "failed"
-    ) {
-      await sleep(500);
-      const response = await fetch("/api/predictions/" + prediction.id, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem(
-            "replicate_api_token"
-          )}`,
-        },
-      });
-      prediction = await response.json();
-      setPredictions((predictions) => ({
-        ...predictions,
-        [prediction.id]: prediction,
-      }));
-      if (response.status !== 200) {
-        setError(prediction.detail);
-        return;
-      }
-    }
-
     setIsProcessing(false);
   };
-
-  const handleTokenSubmit = (e) => {
-    e.preventDefault();
-    console.log(e.target[0].value);
-    localStorage.setItem("replicate_api_token", e.target[0].value);
-    setWelcomeOpen(false);
-  };
-
-  useEffect(() => {
-    const replicateApiToken = localStorage.getItem("replicate_api_token");
-
-    if (replicateApiToken) {
-      setWelcomeOpen(false);
-    } else {
-      setWelcomeOpen(true);
-    }
-  }, []);
 
   return (
     <>
@@ -121,16 +82,13 @@ export default function Home() {
         <meta property="og:description" content={pkg.appMetaDescription} />
         <meta
           property="og:image"
-          content={`${HOST}/og-b7xwc4g4wrdrtneilxnbngzvti.jpg`}
+          content="/og-b7xwc4g4wrdrtneilxnbngzvti.jpg"
         />
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
       </Head>
       <main className="container max-w-[1024px] mx-auto p-5 ">
-        {welcomeOpen ? (
-          <Welcome handleTokenSubmit={handleTokenSubmit} />
-        ) : (
-          <div className="container max-w-[512px] mx-auto">
+        <div className="container max-w-[512px] mx-auto">
             <hgroup>
               <h1 className="text-center text-5xl font-bold m-4">
                 {pkg.appName}
@@ -156,7 +114,6 @@ export default function Home() {
 
             <Error error={error} />
           </div>
-        )}
 
         <Predictions
           predictions={predictions}
@@ -165,7 +122,6 @@ export default function Home() {
         />
       </main>
 
-      <Script src="https://js.bytescale.com/upload-js-full/v1" />
     </>
   );
 }

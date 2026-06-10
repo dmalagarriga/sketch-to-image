@@ -1,48 +1,75 @@
-import { NextResponse } from "next/server";
-import Replicate from "replicate";
-import packageData from "../../../package.json";
+export default async function handler(req, res) {
+  const { prompt, image: scribbleDataUri } = req.body;
 
-async function getObjectFromRequestBodyStream(body) {
-  const input = await body.getReader().read();
-  const decoder = new TextDecoder();
-  const string = decoder.decode(input.value);
-  return JSON.parse(string);
-}
-
-const WEBHOOK_HOST = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : process.env.NGROK_HOST;
-
-export default async function handler(req) {
-  const input = await getObjectFromRequestBodyStream(req.body);
-
-  // Destructure to extract replicate_api_token and keep the rest of the properties in input
-  const { replicate_api_token, ...restInput } = input;
-
-  const replicate = new Replicate({
-    auth: replicate_api_token,
-    userAgent: `${packageData.name}/${packageData.version}`,
-  });
-
-
-  // https://replicate.com/jagilley/controlnet-scribble/versions
-  const prediction = await replicate.predictions.create({
-    version:
-      "435061a1b5a4c1e26740464bf786efdfa9cb3a3ac488595a2de23e143fdb0117",
-    input,
-    webhook: `${WEBHOOK_HOST}/api/replicate-webhook`,
-    webhook_events_filter: ["start", "completed"],
-  });
-
-  if (prediction?.error) {
-    return NextResponse.json({ detail: prediction.error }, { status: 500 });
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ detail: "GEMINI_API_KEY not configured" });
   }
 
-  return NextResponse.json(prediction, { status: 201 });
+  // Extract base64 from data URI (e.g. "data:image/png;base64,...")
+  const imageBase64 = scribbleDataUri.includes(",")
+    ? scribbleDataUri.split(",")[1]
+    : scribbleDataUri;
+
+  let geminiResponse;
+  try {
+    geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `Generate a photorealistic image of: ${prompt}. Use the provided sketch as a reference for composition and structure.`,
+                },
+                {
+                  inline_data: {
+                    mime_type: "image/png",
+                    data: imageBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
+        }),
+      }
+    );
+  } catch (err) {
+    console.error("Gemini fetch error:", err.cause ?? err);
+    return res.status(500).json({ detail: String(err.cause ?? err) });
+  }
+
+  if (!geminiResponse.ok) {
+    const errText = await geminiResponse.text();
+    return res.status(geminiResponse.status).json({ detail: errText });
+  }
+
+  const data = await geminiResponse.json();
+  const imagePart = data.candidates?.[0]?.content?.parts?.find(
+    (p) => p.inlineData ?? p.inline_data
+  );
+
+  if (!imagePart) {
+    return res.status(500).json({ detail: "Gemini no devolvió ninguna imagen." });
+  }
+
+  const imageData = imagePart.inlineData ?? imagePart.inline_data;
+  const outputDataUrl = `data:${imageData.mimeType ?? imageData.mime_type};base64,${imageData.data}`;
+
+  const prediction = {
+    id: crypto.randomUUID(),
+    status: "succeeded",
+    output: [outputDataUrl],
+    input: { prompt, image: scribbleDataUri },
+  };
+
+  return res.status(201).json(prediction);
 }
 
 export const config = {
-  runtime: "edge",
   api: {
     bodyParser: {
       sizeLimit: "10mb",

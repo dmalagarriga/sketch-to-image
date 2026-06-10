@@ -23,12 +23,14 @@ export default function Canvas({
   }, []);
 
   async function loadStartingPaths() {
+    if (!canvasRef.current) return;
     await canvasRef.current.loadPaths(startingPaths);
     setScribbleExists(true);
     onChange();
   }
 
   const onChange = async () => {
+    if (!canvasRef.current) return;
     const paths = await canvasRef.current.exportPaths();
     localStorage.setItem("paths", JSON.stringify(paths, null, 2));
 
@@ -36,7 +38,7 @@ export default function Canvas({
 
     setScribbleExists(true);
 
-    const data = await canvasRef.current.exportImage("png");
+    const data = await canvasRef.current?.exportImage("png");
     onScribble(data);
   };
 
@@ -72,11 +74,11 @@ export default function Canvas({
         <div className="animate-in fade-in duration-700 text-left">
           <button className="lil-button" onClick={undo}>
             <UndoIcon className="icon" />
-            Undo
+            Desfer
           </button>
           <button className="lil-button" onClick={reset}>
             <TrashIcon className="icon" />
-            Clear
+            Esborrar
           </button>
         </div>
       )}

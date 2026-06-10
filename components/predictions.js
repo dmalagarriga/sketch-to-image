@@ -71,7 +71,7 @@ export function Prediction({ prediction, showLinkToNewScribble = false }) {
       <div className="shadow-lg border my-5 p-5 bg-white flex">
         <div className="w-1/2 aspect-square relative border">
           <img
-            src={prediction.input.image}
+            src={prediction.input?.image}
             alt="input scribble"
             className="w-full aspect-square"
           />
@@ -82,6 +82,7 @@ export function Prediction({ prediction, showLinkToNewScribble = false }) {
               src={prediction.output[prediction.output.length - 1]}
               alt="output image"
               className="w-full aspect-square"
+              onError={(e) => { e.target.alt = "Error al cargar la imagen"; }}
             />
           ) : (
             <div className="grid h-full place-items-center">
